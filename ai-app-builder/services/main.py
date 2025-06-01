@@ -9,6 +9,8 @@ import asyncio
 from pathlib import Path
 import subprocess
 from datetime import datetime
+import ast
+import re
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -26,12 +28,23 @@ class AppRequest(BaseModel):
     output_dir: Optional[str] = "./generated_apps"
 
 class ProjectAnalysis(BaseModel):
-    framework: str
-    database: str
-    features: List[str]
-    endpoints: List[str]
-    auth_type: str
-    external_services: List[str]
+    framework: Optional[str] = None
+    database: Optional[str] = None
+    features: Optional[List[str]] = None
+    endpoints: Optional[List[str]] = None
+    auth_type: Optional[str] = None
+    external_services: Optional[List[str]] = None
+
+class EnhancementRequest(BaseModel):
+    project_path: str
+    enhancement_request: str
+    enhancement_type: str = "feature"  # feature, bug_fix, optimization, security
+
+class CodeAnalysis(BaseModel):
+    current_structure: Dict[str, Any]
+    identified_issues: List[str]
+    improvement_suggestions: List[str]
+    complexity_score: int
 
 class AppBuilderService:
     def __init__(self):
@@ -401,6 +414,166 @@ services:
         
         return "\n".join(env_vars)
 
+class EnhancementService:
+    def __init__(self):
+        self.model = model  # Use the same Gemini model
+    
+    async def analyze_existing_code(self, project_path: str) -> CodeAnalysis:
+        """Analyze existing codebase for improvement opportunities"""
+        
+        project_files = self._read_project_files(project_path)
+        
+        analysis_prompt = f"""
+        Analisis kode Python berikut untuk improvement:
+        
+        {json.dumps(project_files, indent=2)}
+        
+        Berikan analisis dalam format JSON:
+        {{
+            "current_structure": {{
+                "files_count": {len(project_files)},
+                "main_components": ["list komponen utama"],
+                "architecture_pattern": "string",
+                "database_used": "string"
+            }},
+            "identified_issues": ["issue1", "issue2"],
+            "improvement_suggestions": ["suggestion1", "suggestion2"],
+            "complexity_score": 5
+        }}
+        
+        Fokus pada:
+        1. Code quality
+        2. Security vulnerabilities  
+        3. Performance bottlenecks
+        4. Missing features
+        5. Architecture improvements
+        
+        Hanya kembalikan JSON, tanpa penjelasan.
+        """
+        
+        try:
+            response = self.model.generate_content(analysis_prompt)
+            result = self._clean_json_response(response.text)
+            return CodeAnalysis(**result)
+        except Exception as e:
+            # Fallback analysis
+            return CodeAnalysis(
+                current_structure={
+                    "files_count": len(project_files),
+                    "main_components": ["main.py", "models.py"],
+                    "architecture_pattern": "FastAPI MVC",
+                    "database_used": "SQLite"
+                },
+                identified_issues=["No specific issues found"],
+                improvement_suggestions=["Add error handling", "Add logging"],
+                complexity_score=5
+            )
+    
+    async def generate_enhancement(self, project_path: str, enhancement_request: str, analysis: CodeAnalysis) -> Dict[str, Any]:
+        """Generate code enhancements based on request and analysis"""
+        
+        existing_files = self._read_project_files(project_path)
+        
+        enhancement_prompt = f"""
+        Berdasarkan request: "{enhancement_request}"
+        
+        Dan file yang ada:
+        {json.dumps(existing_files, indent=2)}
+        
+        Generate code improvements. Format response JSON:
+        {{
+            "modifications": {{
+                "main.py": "complete new code for main.py",
+                "models.py": "complete new code if needed"
+            }},
+            "new_files": {{
+                "new_file.py": "complete new file code"
+            }},
+            "changes_summary": "Penjelasan perubahan yang dilakukan"
+        }}
+        
+        Hanya kembalikan JSON, tanpa markdown atau penjelasan.
+        """
+        
+        try:
+            response = self.model.generate_content(enhancement_prompt)
+            result = self._clean_json_response(response.text)
+            
+            # Apply modifications
+            await self._apply_enhancements(project_path, result)
+            return result
+        except Exception as e:
+            return {"error": str(e), "changes_summary": "Failed to generate enhancements"}
+    
+    def _read_project_files(self, project_path: str) -> Dict[str, str]:
+        """Read all Python files in project"""
+        files = {}
+        project_dir = Path(project_path)
+        
+        if not project_dir.exists():
+            return files
+        
+        for file_path in project_dir.rglob("*.py"):
+            if "venv" not in str(file_path) and "__pycache__" not in str(file_path):
+                try:
+                    relative_path = file_path.relative_to(project_dir)
+                    files[str(relative_path)] = file_path.read_text(encoding='utf-8')
+                except Exception as e:
+                    print(f"Error reading {file_path}: {e}")
+        
+        # Also read other important files
+        for ext in ["*.txt", "*.md", "*.yml", "*.yaml", "Dockerfile"]:
+            for file_path in project_dir.glob(ext):
+                try:
+                    relative_path = file_path.relative_to(project_dir)
+                    files[str(relative_path)] = file_path.read_text(encoding='utf-8')
+                except Exception as e:
+                    print(f"Error reading {file_path}: {e}")
+        
+        return files
+    
+    async def _apply_enhancements(self, project_path: str, enhancements: Dict[str, Any]):
+        """Apply code enhancements to project"""
+        project_dir = Path(project_path)
+        
+        try:
+            # Apply modifications
+            if "modifications" in enhancements:
+                for file_path, new_code in enhancements["modifications"].items():
+                    full_path = project_dir / file_path
+                    if isinstance(new_code, str) and new_code.strip():
+                        full_path.write_text(new_code, encoding='utf-8')
+                        print(f"✅ Modified: {file_path}")
+            
+            # Create new files
+            if "new_files" in enhancements:
+                for file_path, code in enhancements["new_files"].items():
+                    if isinstance(code, str) and code.strip():
+                        full_path = project_dir / file_path
+                        full_path.parent.mkdir(parents=True, exist_ok=True)
+                        full_path.write_text(code, encoding='utf-8')
+                        print(f"✅ Created: {file_path}")
+        except Exception as e:
+            print(f"Error applying enhancements: {e}")
+    
+    def _clean_json_response(self, response_text: str) -> Dict[str, Any]:
+        """Clean and parse JSON response from Gemini"""
+        text = response_text.strip()
+        
+        if text.startswith("```json"):
+            text = text[7:-3]
+        elif text.startswith("```"):
+            text = text[3:-3]
+        
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error: {e}")
+            return {"error": "Failed to parse response", "raw_response": text[:500]}
+        
+# Initialize enhancement service
+enhancement_service = EnhancementService()
+
 # Initialize service
 builder_service = AppBuilderService()
 
@@ -539,6 +712,44 @@ async def list_projects():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "AI App Builder with Gemini"}
+
+@app.post("/analyze-existing")
+async def analyze_existing_code(request: EnhancementRequest):
+    """Analyze existing codebase"""
+    try:
+        if not Path(request.project_path).exists():
+            raise HTTPException(status_code=404, detail="Project path not found")
+        
+        analysis = await enhancement_service.analyze_existing_code(request.project_path)
+        return {"status": "success", "analysis": analysis}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/enhance-app")
+async def enhance_application(request: EnhancementRequest):
+    """Enhance existing application"""
+    try:
+        if not Path(request.project_path).exists():
+            raise HTTPException(status_code=404, detail="Project path not found")
+        
+        # First analyze
+        analysis = await enhancement_service.analyze_existing_code(request.project_path)
+        
+        # Then enhance
+        result = await enhancement_service.generate_enhancement(
+            request.project_path, 
+            request.enhancement_request, 
+            analysis
+        )
+        
+        return {
+            "status": "success",
+            "analysis": analysis,
+            "enhancements": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

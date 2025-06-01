@@ -5,7 +5,7 @@ def test_app_generation():
     """Test the app generation service with Gemini"""
     
     # Test prompt dalam bahasa Indonesia
-    prompt = "Buatkan backend service dengan FastAPI untuk sistem e-commerce dengan authentication JWT, PostgreSQL database, dan fitur CRUD untuk products, users, dan orders. Sertakan juga Redis untuk caching."
+    prompt = "Buatkan backend service dengan FastAPI untuk sistem e-commerce dengan authentication JWT, PostgreSQL database, dan fitur CRUD untuk products, users, dan orders. Sertakan juga Redis untuk caching. Pastikan semua library ter input dengan benar dan pastikan aplikasi dapat berjalan dengan baik."
     
     print("🚀 Testing AI App Builder with Gemini...")
     print(f"📝 Prompt: {prompt}")
